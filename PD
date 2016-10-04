@@ -80,9 +80,9 @@ namespace AmdmData
         {
             OrderedSongs songOrder = cache["songsOrderOf" + performerId] as OrderedSongs;
             var countAll = GetAllSongsCount();
+            var count = GetSongsCount(performerId);
             if (songOrder == null)
-            {
-                var count = GetSongsCount(performerId);
+            {                
                 songOrder = new OrderedSongs
                 {
                     ByName = new List<Songs>(count),
@@ -97,17 +97,60 @@ namespace AmdmData
                 }
                 cache.Set("songsOrderOf" + performerId, songOrder, null);
             }
-            List<Songs> list = songOrder.ByViews;
-            for(int i = 0; i < pageSize; i++)
+            List<Songs> list = new List<Songs>();
+            ///////////////////////////
+            switch (songsSortingType)
             {
-                if(list[pageSize * (songPageNumber - 1) + i] == null)
-                {
-                    var newSong = new AmdmContext().Songs.OrderBy(x => x.Name).Skip((songPageNumber - 1) * pageSize + i).First();
-                    list[pageSize * (songPageNumber - 1) + i] = newSong;
-                    songOrder.ByChordsCount[new AmdmContext().Songs.Count(x => x.Chords.Count * countAll + x.Id < newSong.Chords.Count * countAll + newSong.Id)] = newSong;
-                    songOrder.ByViews[new AmdmContext().Songs.Count(x => x.Views * countAll + x.Id < newSong.Views * countAll + newSong.Id)] = newSong;
-                }
+                case SongsSortingTypes.ByName:                    
+                    for (int i = 0; i < pageSize; i++)
+                    {
+                        if (songOrder.ByName[pageSize * (songPageNumber - 1) + i] == null)
+                        {
+                            var newSong = new AmdmContext().Songs.OrderBy(x => x.Name + "//id//" + x.Id).Skip((songPageNumber - 1) * pageSize + i).First();
+                            songOrder.ByName[pageSize * (songPageNumber - 1) + i] = newSong;
+                            songOrder.ByChordsCount[new AmdmContext().Songs.Count(x => x.Chords.Count * countAll + x.Id < newSong.Chords.Count * countAll + newSong.Id)] = newSong;
+                            songOrder.ByViews[new AmdmContext().Songs.Count(x => x.Views * countAll + x.Id < newSong.Views * countAll + newSong.Id)] = newSong;
+                        }
+                    }
+                    list = songOrder.ByName;
+                    break;
+                case SongsSortingTypes.ByNameBack:                    
+                    break;
+                case SongsSortingTypes.ByChordCount:
+                    for (int i = 0; i < Math.Min(pageSize, count - pageSize * (songPageNumber - 1)); i++)
+                    {
+                        if (songOrder.ByChordsCount[pageSize * (songPageNumber - 1) + i] == null)
+                        {
+                            var newSong = new AmdmContext().Songs.OrderBy(x => x.Chords.Count * countAll + x.Id).Skip((songPageNumber - 1) * pageSize + i).First();
+                            songOrder.ByChordsCount[pageSize * (songPageNumber - 1) + i] = newSong;                            
+                            songOrder.ByViews[new AmdmContext().Songs.Count(x => x.Views * countAll + x.Id < newSong.Views * countAll + newSong.Id)] = newSong;
+                            songOrder.ByName[new AmdmContext().Songs.Count(x => (x.Name + "//id//" + x.Id).CompareTo(newSong.Name + "//id//" + newSong.Id) < 0)] = newSong;
+                        }
+                    }
+                    list = songOrder.ByChordsCount;
+                    break;
+                case SongsSortingTypes.ByChordCountBack:                   
+                    break;
+                case SongsSortingTypes.ByViews:
+                    for (int i = 0; i < pageSize; i++)
+                    {
+                        if (songOrder.ByName[pageSize * (songPageNumber - 1) + i] == null)
+                        {
+                            var newSong = new AmdmContext().Songs.OrderBy(x => x.Views * countAll + x.Id).Skip((songPageNumber - 1) * pageSize + i).First();
+                            songOrder.ByViews[pageSize * (songPageNumber - 1) + i] = newSong;
+                            songOrder.ByChordsCount[new AmdmContext().Songs.Count(x => x.Chords.Count * countAll + x.Id < newSong.Chords.Count * countAll + newSong.Id)] = newSong;                            
+                            songOrder.ByName[new AmdmContext().Songs.Count(x => (x.Name + "//id//" + x.Id).CompareTo(newSong.Name + "//id//" + newSong.Id) < 0)] = newSong;
+                        }
+                    }
+                    list = songOrder.ByViews;
+                    break;
+                case SongsSortingTypes.ByViewsBack:
+                    
+                    break;
             }
+
+
+            ////////////////////////////////
             return list.Skip((songPageNumber - 1) * pageSize).Take(pageSize).ToList();
 
 
@@ -119,39 +162,7 @@ namespace AmdmData
             }
             var songs = songList.AsEnumerable();
            
-            switch (songsSortingType)
-            {
-                case SongsSortingTypes.ByName:
-                    songs = songs.OrderBy(x => x.Name)
-                        .Skip((songPageNumber - 1) * pageSize)
-                        .Take(pageSize);
-                    break;
-                case SongsSortingTypes.ByNameBack:
-                    songs = songs.OrderByDescending(x => x.Name)
-                        .Skip((songPageNumber - 1) * pageSize)
-                        .Take(pageSize);
-                    break;
-                case SongsSortingTypes.ByChordCount:
-                    songs = songs.OrderBy(x => x.Chords.Count * countAll + x.Id)
-                        .Skip((songPageNumber - 1) * pageSize)
-                        .Take(pageSize);
-                    break;
-                case SongsSortingTypes.ByChordCountBack:
-                    songs = songs.OrderByDescending(x => x.Chords.Count * countAll + x.Id)
-                        .Skip((songPageNumber - 1) * pageSize)
-                        .Take(pageSize);
-                    break;
-                case SongsSortingTypes.ByViews:
-                    songs = songs.OrderBy(x => x.Views * countAll + x.Id)
-                        .Skip((songPageNumber - 1) * pageSize)
-                        .Take(pageSize);
-                    break;
-                case SongsSortingTypes.ByViewsBack:
-                    songs = songs.OrderByDescending(x => x.Views * countAll + x.Id)
-                        .Skip((songPageNumber - 1) * pageSize)
-                        .Take(pageSize);
-                    break;
-            }
+            
             return songs.ToList();
         }
 
