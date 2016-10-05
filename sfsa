@@ -1,0 +1,334 @@
+using AmdmData.Enums;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Runtime.Hosting;
+using System.Runtime.Caching;
+using System.IO;
+
+namespace AmdmData
+{
+    public class PerformerData
+    {
+        private static ObjectCache cache = MemoryCache.Default;
+
+        public static List<Performers> GetPageOfPerformerList(PerformersSortingTypes performersSortingType, int performersPageNumber, int pageSize)
+        {
+            List<Performers> performers = cache[performersSortingType.ToString()+performersPageNumber+","+pageSize] as List<Performers>;
+            if (performers == null)
+            {   
+                var count = GetPerformersCount();
+                var performersContext = new AmdmContext().Performers.AsQueryable();
+                switch (performersSortingType)
+                {
+                    case PerformersSortingTypes.ByName:
+                        performersContext = performersContext.OrderBy(x => x.Name)
+                            .Skip((performersPageNumber - 1) * pageSize)
+                            .Take(pageSize);
+                        break;
+                    case PerformersSortingTypes.ByNameBack:
+                        performersContext = performersContext.OrderByDescending(x => x.Name)
+                            .Skip((performersPageNumber - 1) * pageSize)
+                            .Take(pageSize);
+                        break;
+                    case PerformersSortingTypes.BySongCount:
+                        performersContext = performersContext.OrderBy(x => x.Songs.Count * count + x.Id)
+                            .Skip((performersPageNumber - 1) * pageSize)
+                            .Take(pageSize);
+                        break;
+                    case PerformersSortingTypes.BySongCountBack:
+                        performersContext = performersContext.OrderByDescending(x => x.Songs.Count * count + x.Id)
+                            .Skip((performersPageNumber - 1) * pageSize)
+                            .Take(pageSize);
+                        break;
+                    default:
+                        break;
+                }
+                performers = performersContext.ToList();
+                cache.Set(performersSortingType.ToString() + performersPageNumber + "," + pageSize, performers, null);
+            }
+            return performers;
+        }
+        public static int GetPerformersCount()
+        {
+            NullInt count = cache["performerCount"] as NullInt;
+            if (count == null)
+            {
+                count = new NullInt
+                {
+                    Value = new AmdmContext().Performers.Count()
+                };
+                cache.Set("performerCount", count, null);
+            }
+            return count.Value;
+        }
+
+      
+
+        public static Performers GetPerformerById(int performerId)
+        {
+            Performers performer = cache["performer" + performerId] as Performers;
+            if (performer == null)
+            {
+                performer = new AmdmContext().Performers.Find(performerId);
+                cache.Set("performer" + performerId, performer, null);
+            }
+            return performer;
+        }
+        public static List<Songs> GetPageOfSongList(int performerId, SongsSortingTypes songsSortingType, int songPageNumber, int pageSize)
+        {
+            List<Songs> list = new List<Songs>();
+            bool reverseFlag = false;
+            var countAll = GetAllSongsCount();
+            var count = GetSongsCount(performerId);
+            int thisPageSize = Math.Min(pageSize, count - pageSize * (songPageNumber - 1));
+            int skip = pageSize * (songPageNumber - 1);            
+            OrderedSongs songOrder = cache["songsOrderOf" + performerId] as OrderedSongs;
+                        
+            if (songOrder == null)
+            {                
+                songOrder = new OrderedSongs
+                {
+                    ByName = new List<Songs>(count),
+                    ByChordsCount = new List<Songs>(count),
+                    ByViews = new List<Songs>(count)
+                };
+                for(int i = 0; i < count; i++)
+                {
+                    songOrder.ByName.Add(null);
+                    songOrder.ByChordsCount.Add(null);
+                    songOrder.ByViews.Add(null);
+                }
+                cache.Set("songsOrderOf" + performerId, songOrder, null);
+            }            
+            switch (songsSortingType)
+            {
+                case SongsSortingTypes.ByName:
+                    for (int i = 0; i < thisPageSize; i++)
+                    {
+                        if (songOrder.ByName[skip + i] == null)
+                        {
+                            var newSong = new AmdmContext().Songs.OrderBy(x => x.Name + "//id//" + x.Id).Skip(skip + i).First();
+                            songOrder.ByName[skip + i] = newSong;
+                            songOrder.ByChordsCount[new AmdmContext().Songs.Count(x => x.Chords.Count * countAll + x.Id < newSong.Chords.Count * countAll + newSong.Id)] = newSong;
+                            songOrder.ByViews[new AmdmContext().Songs.Count(x => x.Views * countAll + x.Id < newSong.Views * countAll + newSong.Id)] = newSong;
+                        }
+                    }
+                    list = songOrder.ByName;
+                    break;
+                case SongsSortingTypes.ByNameBack:
+                    skip = count - skip - thisPageSize;
+                    reverseFlag = true;
+                    for (int i = 0; i < thisPageSize; i++)
+                    {
+                        if (songOrder.ByName[skip + i] == null)
+                        {
+                            var newSong = new AmdmContext().Songs.OrderBy(x => x.Name + "//id//" + x.Id).Skip(skip + i).First();
+                            songOrder.ByName[skip + i] = newSong;
+                            songOrder.ByChordsCount[new AmdmContext().Songs.Count(x => x.Chords.Count * countAll + x.Id < newSong.Chords.Count * countAll + newSong.Id)] = newSong;
+                            songOrder.ByViews[new AmdmContext().Songs.Count(x => x.Views * countAll + x.Id < newSong.Views * countAll + newSong.Id)] = newSong;
+                        }
+                    }
+                    list = songOrder.ByName;                    
+                    break;                
+                case SongsSortingTypes.ByChordCountBack:
+                    skip = count - skip - thisPageSize;
+                    reverseFlag = true;
+                    for (int i = 0; i < thisPageSize; i++)
+                    {
+                        if (songOrder.ByChordsCount[skip + i] == null)
+                        {
+                            var newSong = new AmdmContext().Songs.OrderBy(x => x.Chords.Count * countAll + x.Id).Skip(skip + i).First();
+                            songOrder.ByChordsCount[skip + i] = newSong;
+                            songOrder.ByViews[new AmdmContext().Songs.Count(x => x.Views * countAll + x.Id < newSong.Views * countAll + newSong.Id)] = newSong;
+                            songOrder.ByName[new AmdmContext().Songs.Count(x => (x.Name + "//id//" + x.Id).CompareTo(newSong.Name + "//id//" + newSong.Id) < 0)] = newSong;
+                        }
+                    }
+                    list = songOrder.ByChordsCount;
+                    break;
+                case SongsSortingTypes.ByChordCount:
+                    for (int i = 0; i < thisPageSize; i++)
+                    {
+                        if (songOrder.ByChordsCount[skip + i] == null)
+                        {
+                            var newSong = new AmdmContext().Songs.OrderBy(x => x.Chords.Count * countAll + x.Id).Skip(skip + i).First();
+                            songOrder.ByChordsCount[skip + i] = newSong;
+                            songOrder.ByViews[new AmdmContext().Songs.Count(x => x.Views * countAll + x.Id < newSong.Views * countAll + newSong.Id)] = newSong;
+                            songOrder.ByName[new AmdmContext().Songs.Count(x => (x.Name + "//id//" + x.Id).CompareTo(newSong.Name + "//id//" + newSong.Id) < 0)] = newSong;
+                        }
+                    }
+                    list = songOrder.ByChordsCount;                   
+                    break;
+                case SongsSortingTypes.ByViews:
+                    for (int i = 0; i < thisPageSize; i++)
+                    {
+                        if (songOrder.ByViews[skip + i] == null)
+                        {
+                            var newSong = new AmdmContext().Songs.OrderBy(x => x.Views * countAll + x.Id).Skip(skip + i).First();
+                            songOrder.ByViews[skip + i] = newSong;
+                            songOrder.ByChordsCount[new AmdmContext().Songs.Count(x => x.Chords.Count * countAll + x.Id < newSong.Chords.Count * countAll + newSong.Id)] = newSong;
+                            songOrder.ByName[new AmdmContext().Songs.Count(x => (x.Name + "//id//" + x.Id).CompareTo(newSong.Name + "//id//" + newSong.Id) < 0)] = newSong;
+                        }
+                    }
+                    list = songOrder.ByViews;
+                    break;
+                case SongsSortingTypes.ByViewsBack:                    
+                    skip = count - skip - thisPageSize;
+                    reverseFlag = true;
+                    for (int i = 0; i < thisPageSize; i++)
+                    {
+                        if (songOrder.ByViews[skip + i] == null)
+                        {
+                            var newSong = new AmdmContext().Songs.OrderBy(x => x.Views * countAll + x.Id).Skip(skip + i).First();
+                            songOrder.ByViews[skip + i] = newSong;
+                            songOrder.ByChordsCount[new AmdmContext().Songs.Count(x => x.Chords.Count * countAll + x.Id < newSong.Chords.Count * countAll + newSong.Id)] = newSong;
+                            songOrder.ByName[new AmdmContext().Songs.Count(x => (x.Name + "//id//" + x.Id).CompareTo(newSong.Name + "//id//" + newSong.Id) < 0)] = newSong;
+                        }
+                    }
+                    list = songOrder.ByViews;
+                    break;
+            }           
+            list = list.Skip(skip).Take(thisPageSize).ToList();
+            if (reverseFlag) list.Reverse();
+            return list;            
+        }
+
+        public static string GetPerformerName(int performerId)
+        {
+            String name = cache["performerName" + performerId] as String;
+            if (name == null)
+            {
+                name = new AmdmContext().Performers.Find(performerId).Name;                
+                cache.Set("performerName" + performerId, name, null);
+            }
+            return name;
+        }
+        public static Songs GetSongById(int songId)
+        {
+            Songs song = cache["song" + songId] as Songs;
+            if (song == null)
+            {
+                song = new AmdmContext().Songs.Find(songId);
+                cache.Set("song" + songId, song, null);
+            }
+            return song;
+        }
+        public static int GetSongsCount(int performerId)
+        {
+            NullInt count = cache["songsOf" + performerId] as NullInt;
+
+            if (count == null)
+            {
+                count = new NullInt
+                {
+                    Value = new AmdmContext().Songs.Where(x => x.PerformerId == performerId).Count()
+                };
+                cache.Set("songsOf" + performerId, count, null);
+            }
+            return count.Value;
+        }
+        public static int GetAllSongsCount()
+        {
+            NullInt count = cache["songsCount"] as NullInt;
+
+            if (count == null)
+            {
+                count = new NullInt
+                {
+                    Value = new AmdmContext().Songs.Count()
+                };
+                cache.Set("songsCount", count, null);
+            }
+            return count.Value;
+        }
+
+        /////////////////////////////////////////////////////////
+
+        public static bool EditSong(int songId, string name, string text, string chords)
+        {
+            Songs song;
+            var countAll = GetAllSongsCount();
+            var chordsNamesList = chords.Trim().Split(',').ToList();
+            using (var context = new AmdmContext())
+            {
+                context.SaveChanges();
+                song = context.Songs.Find(songId);
+                song.Name = name;
+                song.Text = text;
+                song.Chords = new List<Chords>();
+                chordsNamesList = chordsNamesList.Select(x => x.Trim()).ToList();
+                var chordsList = context.Chords.AsEnumerable().ToList();
+                var chordsListString = chordsList.Select(x => x.Name).ToList();
+                chordsNamesList = chordsListString.Intersect(chordsNamesList).OrderBy(x => x).ToList();
+                chordsNamesList.ForEach(x => song.Chords.Add(context.Chords.SingleOrDefault(y => y.Name.Equals(x))));
+                context.SaveChanges();
+            }
+            cache.Set("song" + songId, song, null);
+            cache.Set("ChordsAsStrings" + songId, chordsNamesList, null);
+            ///////////////////////////////////////////////////
+            //////////////////////////////////////////////////
+            OrderedSongs songOrder = cache["songsOrderOf" + song.PerformerId] as OrderedSongs;
+            if (songOrder != null)
+            {
+                int oldByName = songOrder.ByName.FindIndex(s => s.Id == song.Id);
+                int oldByChordsCount = songOrder.ByChordsCount.FindIndex(s => s.Id == song.Id);
+                int oldByViews = songOrder.ByViews.FindIndex(s => s.Id == song.Id);
+                int newByName = new AmdmContext().Songs.Count(x => (x.Name + "//id//" + x.Id).CompareTo(song.Name + "//id//" + song.Id) < 0);
+                int newByChordsCount = new AmdmContext().Songs.Count(x => x.Chords.Count * countAll + x.Id < song.Chords.Count * countAll + song.Id);
+                int newByViews = new AmdmContext().Songs.Count(x => x.Views * countAll + x.Id < song.Views * countAll + song.Id);
+                UpdateOrder(songOrder.ByName, oldByName, newByName, song);
+                UpdateOrder(songOrder.ByChordsCount, oldByChordsCount, newByChordsCount, song);
+                UpdateOrder(songOrder.ByViews, oldByViews, newByViews, song);
+            }
+            //////////////////////////////////////////////////
+            ///////////////////////////////////////////////////            
+            return true;
+        }
+        public static List<string> GetChordsAsStrings(int songId)
+        {
+            List<string> listOfChords = cache["ChordsAsStrings" + songId] as List<string>;
+            if (listOfChords == null)
+            {
+                listOfChords = new AmdmContext().Songs.Find(songId).Chords.Select(x => x.Name).ToList();
+                cache.Set("ChordsAsStrings" + songId, listOfChords, null);
+            }
+            return listOfChords;
+        }
+
+        /////////////////////////////////////////////////////////
+
+        public static List<int> GetPerformersId()
+        {
+            List<int> listOfIds = cache["PerformersId"] as List<int>;
+            if (listOfIds == null)
+            {
+                listOfIds = new AmdmContext().Performers.AsQueryable().Select(x => x.Id).ToList();
+                cache.Set("PerformersId", listOfIds, null);
+            }
+            return listOfIds;
+
+        }
+
+
+        public static void UpdateOrder(List<Songs> songs, int oldIndex, int newIndex, Songs newSong)
+        {
+            int d = newIndex - oldIndex;
+            if (d != 0)
+            {
+                int mode = (d) / Math.Abs(d);
+                for (int i = 0; Math.Abs(i) < Math.Abs(d); i = i + mode)
+                {
+                    songs[oldIndex + i] = songs[oldIndex + i + mode];
+                }
+            }
+            songs[newIndex] = newSong;
+        }
+
+
+
+
+        
+    }
+}
